@@ -3,7 +3,7 @@
 #   source /path/to/davinci-tools/bin/davinci-tools.bashrc
 
 # Determine the bin directory (works even if sourced)
-_DAVINCI_TOOLS_BIN="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_DAVINCI_TOOLS_BIN="$( cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd -P )"
 
 # Add to PATH if not already present
 if [[ ":${PATH}:" != *":${_DAVINCI_TOOLS_BIN}:"* ]]; then

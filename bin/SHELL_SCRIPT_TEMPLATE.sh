@@ -36,6 +36,9 @@ die() {
 
     helper_2() {
         echo
+        helper_1 "$@" &>/dev/null # when redirecting or piping, prefer the bashisms "&>" and "|&" if we're doing both stdout+stderr
+        # or...
+        helper_1 "$@" |& awk '...'
     }
 }
 
