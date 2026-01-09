@@ -1,0 +1,10 @@
+# logs directory
+
+Contains timestamped run logs from color-digest.sh and other tools.
+
+Logs are in Unix-style text format:
+```
+YYYY-MM-DD HH:MM:SS [category] [severity] message
+```
+
+Files are not tracked in git (see .gitignore).

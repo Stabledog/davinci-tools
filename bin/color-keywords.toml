@@ -1,0 +1,130 @@
+# color-keywords.toml
+# Configuration for DaVinci Resolve Color section detection and digest generation
+#
+# This file defines keyword lists and detection parameters for automatically
+# identifying and extracting the Color section from the DaVinci Resolve manual.
+
+[detection]
+# Minimum number of keyword hits in sliding window to consider page part of Color section
+min_keyword_density = 5
+
+# Sliding window size (pages) for keyword density calculation
+window_size = 10
+
+# Keywords that must appear near bookmarks for high-confidence detection
+bookmark_match_keywords = ["Color Page", "Color Grading", "Color"]
+
+[keywords]
+# Primary keywords for Color section identification
+# Higher weight terms appear more frequently in Color-specific content
+primary = [
+    "Color Page",
+    "Color",
+    "Grading",
+    "Node",
+    "Nodes",
+    "Primary Correction",
+    "Secondary Correction",
+]
+
+# Technical terms specific to color grading workflows
+technical = [
+    "LUT",
+    "Power Window",
+    "Qualifier",
+    "Tracker",
+    "Color Warper",
+    "Curves",
+    "Log Wheels",
+    "Offset",
+    "Lift",
+    "Gamma",
+    "Gain",
+]
+
+# Scope and measurement tools
+scopes = [
+    "Scopes",
+    "Waveform",
+    "Parade",
+    "Vectorscope",
+    "Histogram",
+]
+
+# Color management and technical standards
+color_management = [
+    "HDR",
+    "ACES",
+    "DaVinci Color Management",
+    "DCM",
+    "Color Space",
+    "YRGB",
+    "PQ",
+    "HLG",
+    "Rec.709",
+    "Rec.2020",
+]
+
+# Organizational and workflow terms
+workflow = [
+    "Gallery",
+    "Still",
+    "CDL",
+    "Timeline Grade",
+    "Clip Grade",
+    "Node Tree",
+]
+
+[glossary]
+# Terms to extract and reference in the digest glossary
+# Format: term = "brief description (optional)"
+terms = [
+    "Node",
+    "Primary",
+    "Secondary",
+    "Qualifier",
+    "Power Window",
+    "Tracker",
+    "LUT",
+    "ACES",
+    "HDR",
+    "PQ",
+    "HLG",
+    "Color Warper",
+    "Gallery",
+    "CDL",
+    "Curves",
+    "Log Wheels",
+    "Offset",
+    "Lift",
+    "Gamma",
+    "Gain",
+    "Waveform",
+    "Parade",
+    "Vectorscope",
+]
+
+[digest]
+# Sections to generate in the digest markdown
+sections = [
+    "Introduction",
+    "Color Page Layout",
+    "Primary Correction Tools",
+    "Secondary Correction Tools",
+    "Node System",
+    "Curves and Advanced Tools",
+    "Scopes and Measurement",
+    "LUTs and Color Management",
+    "ACES Workflow",
+    "HDR Grading",
+    "Practical Workflows",
+    "Troubleshooting",
+]
+
+# Mermaid diagram placeholders to insert
+diagrams = [
+    {name = "Node Graph", description = "Serial vs parallel node connections, signal flow"},
+    {name = "Color Pipeline", description = "Input → Color Space → Grading → Output transform"},
+    {name = "Scopes Decision Helper", description = "Which scope to use for which task"},
+    {name = "LUT Placement", description = "Where LUTs fit in the node tree"},
+]
