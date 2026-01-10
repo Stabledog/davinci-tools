@@ -105,6 +105,26 @@ die() {
     log_info "✓ All dependencies present"
     }
 
+    check_ai_connection() {
+    log_section "Validating AI Connection"
+    
+    log_info "Testing $AI_PROVIDER API connection..."
+    
+    # Use Python to test the actual API connection
+    local test_result
+    if ! test_result=$(python "$scriptDir/doc-ai-processor.py" \
+        --test-connection \
+        --provider "$AI_PROVIDER" \
+        ${AI_MODEL:+--model "$AI_MODEL"} \
+        --max-tokens 100 2>&1); then
+        log_error "AI connection test failed"
+        echo "$test_result" >&2
+        die "Cannot proceed without valid AI API access. Please check your API key and credentials."
+    fi
+    
+    log_info "✓ AI connection validated"
+    }
+
     # Parse metadata file (TOML or JSON)
     parse_metadata() {
     local metadata_file=$1
@@ -442,6 +462,9 @@ main() {
     
     # Check dependencies
     check_dependencies
+    
+    # Check AI connection before doing expensive work
+    check_ai_connection
     
     # Parse and validate metadata
     log_info "Parsing metadata: $metadata_file"

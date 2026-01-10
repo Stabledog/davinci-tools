@@ -310,19 +310,21 @@ def main():
     parser = argparse.ArgumentParser(
         description="AI-powered documentation processing: summaries, indexes, diagrams"
     )
-    parser.add_argument("--text-file", type=Path, required=True,
+    parser.add_argument("--test-connection", action="store_true",
+                        help="Test API connection and exit")
+    parser.add_argument("--text-file", type=Path,
                         help="Path to extracted text file")
-    parser.add_argument("--section-name", required=True,
+    parser.add_argument("--section-name",
                         help="Section name from metadata")
-    parser.add_argument("--section-title", required=True,
+    parser.add_argument("--section-title",
                         help="Section title")
     parser.add_argument("--section-description", default="",
                         help="Section description")
     parser.add_argument("--doc-version", default="unknown",
                         help="Document version")
-    parser.add_argument("--source-name", required=True,
+    parser.add_argument("--source-name",
                         help="Source document name (for output filenames)")
-    parser.add_argument("--output-dir", type=Path, required=True,
+    parser.add_argument("--output-dir", type=Path,
                         help="Output directory for generated files")
     parser.add_argument("--provider", default=os.getenv("AI_PROVIDER", "anthropic"),
                         choices=["anthropic", "openai"],
@@ -334,6 +336,49 @@ def main():
                         help="Max tokens for AI responses")
     
     args = parser.parse_args()
+    
+    # Setup AI processor
+    try:
+        ai_processor = AIProcessor(
+            provider=args.provider,
+            model=args.model,
+            max_tokens=args.max_tokens
+        )
+    except Exception as e:
+        print(f"ERROR: Failed to setup AI processor: {e}", file=sys.stderr)
+        sys.exit(1)
+    
+    # Handle connection test mode
+    if args.test_connection:
+        try:
+            print(f"Testing {args.provider} API connection...")
+            response = ai_processor.call_ai("Respond with only: OK")
+            if "OK" in response.upper():
+                print(f"✓ Connection successful (model: {ai_processor.model})")
+                sys.exit(0)
+            else:
+                print(f"WARNING: Unexpected response: {response}", file=sys.stderr)
+                sys.exit(1)
+        except Exception as e:
+            print(f"ERROR: Connection test failed: {e}", file=sys.stderr)
+            sys.exit(1)
+    
+    # Validate inputs for normal processing mode
+    if not args.text_file:
+        print("ERROR: --text-file is required", file=sys.stderr)
+        sys.exit(1)
+    if not args.section_name:
+        print("ERROR: --section-name is required", file=sys.stderr)
+        sys.exit(1)
+    if not args.section_title:
+        print("ERROR: --section-title is required", file=sys.stderr)
+        sys.exit(1)
+    if not args.source_name:
+        print("ERROR: --source-name is required", file=sys.stderr)
+        sys.exit(1)
+    if not args.output_dir:
+        print("ERROR: --output-dir is required", file=sys.stderr)
+        sys.exit(1)
     
     # Validate inputs
     if not args.text_file.exists():
