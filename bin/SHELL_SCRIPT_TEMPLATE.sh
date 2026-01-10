@@ -1,11 +1,13 @@
 #!/bin/bash
 # SHELL_SCRIPT_TEMPLATE.sh
 # AI instructions:  
+#  - AI agents: be sure to check ../AGENTS.md and make changes that conform to ../SHELL_SCRIPT_TEMPLATE.md as a standard.
 #  - shell scripts should be patterned after this file.
 #  - read the comments for additional standard coding instructions and principles
 #  - run shellcheck after all changes, it must pass.  It is OK to suppress violations that are difficult to resolve otherwise.
 
-set -ue  # Always default to strict -ue
+set -euo pipefail  # Be strict about error handling
+
 
 # PS4 provides good diagnostics when -x is turned on
 #shellcheck disable=2154
@@ -32,7 +34,7 @@ die() {
     sample_makefile() {
         # If you need to print lots of text or create file from templates, don't 
         # use long sequences of 'echo' commands (the code is less maintainable and harder to read)
-        # A here-doc with some creative 'cut' works well:
+        # A heredoc with some creative 'cut' works well:
         #shellcheck disable=2116
         cut -c 12- > /tmp/myfile <<- EOF
             This text will be trimmed on the left by 12 chars
