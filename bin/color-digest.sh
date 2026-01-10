@@ -1,11 +1,11 @@
 #!/bin/bash
 # color-digest.sh
-# Automatically extract and digest the Color section from DaVinci Resolve manual
+# Extract and digest a section from DaVinci Resolve manual
 #
 # Pipeline stages:
 #   1. Validate inputs (manual exists, tools available)
-#   2. Outline/keyword detection (find Color section boundaries)
-#   3. Slice manual (extract Color pages to separate PDF)
+#   2. Load page boundaries (from environment or metadata file)
+#   3. Slice manual (extract pages to separate PDF)
 #   4. Extract text (PDF to layout-preserved text)
 #   5. Generate digest stub (markdown with placeholders and page refs)
 #   6. Logging (reproducible run log with all metadata)
@@ -35,9 +35,9 @@ export COLOR_PDF="${COLOR_PDF:-"${DOCS_DIR}/DaVinci_Resolve_Manual.color-grading
 export COLOR_TXT="${COLOR_TXT:-"${DOCS_DIR}/DaVinci_Resolve_Manual.color-grading.txt"}"
 export DIGEST_MD="${DIGEST_MD:-"${DOCS_DIR}/DaVinci_Resolve_Manual.digest.color-grading.md"}"
 
-# Detection thresholds (experimental, tunable)
-MIN_KEYWORD_DENSITY="${MIN_KEYWORD_DENSITY:-5}"
-WINDOW_SIZE="${WINDOW_SIZE:-10}"
+# Page boundary configuration (must be provided externally)
+export START_PAGE="${START_PAGE:-}"
+export END_PAGE="${END_PAGE:-}"
 
 # Timestamp for this run
 RUN_TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
@@ -144,223 +144,64 @@ die() {
         qpdf --version 2>&1 | head -n1 | while IFS= read -r line; do
             log_message "INFO" "versions" "qpdf: $line"
         done
-        
-        rg --version 2>&1 | head -n1 | while IFS= read -r line; do
-            log_message "INFO" "versions" "ripgrep: $line"
-        done
     }
 
-    detect_color_section() {
-        log_message "INFO" "detect" "Starting Color section detection..."
+    # ==============================================================================
+    # AUTOMATIC BOUNDARY DETECTION - REMOVED
+    # ==============================================================================
+    # The detect_color_section() function was removed as part of strategy shift.
+    # Previously this function performed:
+    #   - TOC parsing and grep-based section discovery
+    #   - Keyword density sliding window analysis
+    #   - Ripgrep-based page content scanning
+    #
+    # These features were experimental and insufficiently smart to handle the general problem
+    #
+    # REPLACEMENT: Page boundaries must now be provided explicitly.
+    # See AGENTS.md for rationale (failures are first-class data).
+    # ==============================================================================
+
+    load_page_boundaries() {
+        log_message "INFO" "boundaries" "Loading page boundaries..."
         
-        # Create temp directory
+        # Create temp directory for intermediate files
         TEMP_DIR="$(mktemp -d)"
-        log_message "INFO" "detect" "Temp directory: ${TEMP_DIR}"
+        log_message "INFO" "boundaries" "Temp directory: ${TEMP_DIR}"
         
-        # Extract bookmarks/outline
-        log_message "INFO" "detect" "Extracting PDF outline/bookmarks..."
-        
-        # For a large PDF, qpdf JSON parsing can be slow/complex
-        # Instead, extract TOC from first pages to find section boundaries
-        log_message "INFO" "detect" "Extracting table of contents..."
-        pdftotext -f 1 -l 30 -layout "${RESOLVE_MANUAL}" "${TEMP_DIR}/toc.txt"
-        
-        # Scan for "Color" bookmark/heading
-        local color_start_page=""
-        local color_end_page=""
-        
-        # Simple heuristic: grep for "Color" in TOC and extract page numbers
-        # This is a simplified approach; real implementation may need OCR or better outline parsing
-        if grep -i "^.*Color.*\\.\\+.*[0-9]\\+$" "${TEMP_DIR}/toc.txt" > "${TEMP_DIR}/color_toc_match.txt" 2>/dev/null; then
-            log_message "INFO" "detect" "Found Color references in TOC"
-            cat "${TEMP_DIR}/color_toc_match.txt" | while IFS= read -r line; do
-                log_message "INFO" "detect" "TOC match: $line"
-            done
+        # TODO: Support loading from metadata file (TOML/JSON)
+        # For now, require environment variables
+        if [[ -z "${START_PAGE:-}" ]] || [[ -z "${END_PAGE:-}" ]]; then
+            die "Page boundaries required. Set START_PAGE and END_PAGE environment variables."
         fi
         
-        # Get total page count
+        # Validate page numbers are integers
+        if ! [[ "${START_PAGE}" =~ ^[0-9]+$ ]] || ! [[ "${END_PAGE}" =~ ^[0-9]+$ ]]; then
+            die "START_PAGE and END_PAGE must be positive integers"
+        fi
+        
+        # Validate START_PAGE <= END_PAGE
+        if [[ "${START_PAGE}" -gt "${END_PAGE}" ]]; then
+            die "START_PAGE (${START_PAGE}) must be <= END_PAGE (${END_PAGE})"
+        fi
+        
+        # Get total page count and validate bounds
         local total_pages
         total_pages="$(pdfinfo "${RESOLVE_MANUAL}" | grep '^Pages:' | awk '{print $2}')"
-        log_message "INFO" "detect" "Total pages in manual: ${total_pages}"
+        log_message "INFO" "boundaries" "Total pages in manual: ${total_pages}"
         
-        # Try to narrow range using TOC
-        local toc_hint_start=""
-        local toc_hint_end=""
-        
-        # Look for main Color Page chapter in TOC
-        # Priority: "Using the Color Page" > "Introduction to Color Grading" > generic "Color"
-        if grep -E -i "(using the color page|introduction to color grading|color page timeline).*[0-9]{2,4}" "${TEMP_DIR}/toc.txt" > "${TEMP_DIR}/color_toc_match.txt" 2>/dev/null; then
-            log_message "INFO" "detect" "Found main Color Page chapter in TOC:"
-            cat "${TEMP_DIR}/color_toc_match.txt" | while IFS= read -r line; do
-                log_message "INFO" "detect" "  $line"
-            done
-            
-            # Extract first page number from the main Color section
-            toc_hint_start=$(grep -E -i -o "(using the color page|introduction to color grading).*[0-9]{2,4}" "${TEMP_DIR}/color_toc_match.txt" | head -n1 | grep -o "[0-9]\{2,4\}$" || echo "")
-            if [[ -n "$toc_hint_start" ]]; then
-                log_message "INFO" "detect" "TOC indicates main Color section starts around page ${toc_hint_start}"
-            fi
-        elif grep -E -i "color.*[0-9]{2,4}" "${TEMP_DIR}/toc.txt" > "${TEMP_DIR}/color_toc_lines.txt" 2>/dev/null; then
-            log_message "WARN" "detect" "Could not find main Color Page chapter, using generic color matches:"
-            cat "${TEMP_DIR}/color_toc_lines.txt" | head -n 5 | while IFS= read -r line; do
-                log_message "WARN" "detect" "  $line"
-            done
-            
-            # Fallback: extract first page number (may not be the main Color section)
-            toc_hint_start=$(grep -E -i -o "color.*[0-9]{2,4}" "${TEMP_DIR}/color_toc_lines.txt" | head -n1 | grep -o "[0-9]\{2,4\}$" || echo "")
-            if [[ -n "$toc_hint_start" ]]; then
-                log_message "WARN" "detect" "TOC suggests Color-related content starts around page ${toc_hint_start} (may need manual verification)"
-            fi
+        if [[ "${END_PAGE}" -gt "${total_pages}" ]]; then
+            die "END_PAGE (${END_PAGE}) exceeds total pages (${total_pages})"
         fi
         
-        # Keyword-based detection: scan manual in chunks
-        # If we have a TOC hint, start there; otherwise scan broadly
-        local scan_start=1
-        local scan_end="$total_pages"
+        log_message "INFO" "boundaries" "Using provided page boundaries: ${START_PAGE}-${END_PAGE}"
         
-        if [[ -n "$toc_hint_start" ]] && [[ "$toc_hint_start" -gt 0 ]]; then
-            # Search window around TOC hint
-            scan_start=$((toc_hint_start - 50))
-            if [[ $scan_start -lt 1 ]]; then scan_start=1; fi
-            scan_end=$((toc_hint_start + 500))  # Color section is likely large, search ahead
-            if [[ $scan_end -gt $total_pages ]]; then scan_end=$total_pages; fi
-            log_message "INFO" "detect" "Narrowing scan range to pages ${scan_start}-${scan_end} based on TOC"
-        fi
-        
-        log_message "INFO" "detect" "Starting keyword-based page scanning (range: ${scan_start}-${scan_end})..."
-        log_message "INFO" "detect" "Starting keyword-based page scanning (range: ${scan_start}-${scan_end})..."
-        log_message "INFO" "detect" "This may take several minutes for a large manual..."
-        
-        # Get keywords from config
-        local keywords_file="${TEMP_DIR}/keywords.txt"
-        "${CONFIG_READER}" --list-keywords --config "${CONFIG_FILE}" > "${keywords_file}"
-        local keyword_count
-        keyword_count="$(wc -l < "${keywords_file}")"
-        log_message "INFO" "detect" "Loaded ${keyword_count} keywords from config"
-        
-        # Scan pages in chunks to find highest density region
-        local best_start=0
-        local best_end=0
-        local best_density=0
-        
-        # For efficiency, sample every 10 pages initially
-        local sample_stride=10
-        for ((page=scan_start; page<=scan_end; page+=sample_stride)); do
-            local end_page=$((page + WINDOW_SIZE))
-            if [[ $end_page -gt $total_pages ]]; then
-                end_page=$total_pages
-            fi
-            
-            # Extract text for this window
-            pdftotext -f "$page" -l "$end_page" -layout "${RESOLVE_MANUAL}" "${TEMP_DIR}/window_${page}.txt" 2>/dev/null || continue
-            
-            # Count keyword hits
-            local hits=0
-            while IFS= read -r keyword; do
-                local count
-                count=$(rg -i -c "$keyword" "${TEMP_DIR}/window_${page}.txt" 2>/dev/null || echo "0")
-                hits=$((hits + count))
-            done < "${keywords_file}"
-            
-            local density=$((hits / WINDOW_SIZE))
-            
-            if [[ $density -gt $best_density ]]; then
-                best_density=$density
-                best_start=$page
-                best_end=$end_page
-                log_message "INFO" "detect" "New best window: pages ${best_start}-${best_end}, density=${best_density} hits/page"
-            fi
-        done
-        
-        if [[ $best_density -lt $MIN_KEYWORD_DENSITY ]]; then
-            log_message "WARN" "detect" "Best keyword density ($best_density) below threshold ($MIN_KEYWORD_DENSITY)"
-            log_message "WARN" "detect" "Proceeding anyway; may need manual adjustment"
-        fi
-        
-        # Refine boundaries: expand window and find precise start/end
-        local refined_start=$((best_start - 50))
-        if [[ $refined_start -lt 1 ]]; then refined_start=1; fi
-        
-        local refined_end=$((best_end + 50))
-        if [[ $refined_end -gt $total_pages ]]; then refined_end=$total_pages; fi
-        
-        # Find first page with strong "Color" keyword match
-        for ((page=refined_start; page<=best_start; page++)); do
-            pdftotext -f "$page" -l "$page" -layout "${RESOLVE_MANUAL}" "${TEMP_DIR}/page_${page}.txt" 2>/dev/null || continue
-            if rg -i "Color Page|Color Grading|^Color$" "${TEMP_DIR}/page_${page}.txt" &>/dev/null; then
-                color_start_page=$page
-                log_message "INFO" "detect" "Found Color section start: page ${color_start_page}"
-                break
-            fi
-        done
-        
-        if [[ -z "$color_start_page" ]]; then
-            color_start_page=$best_start
-            log_message "WARN" "detect" "Could not find precise start, using window start: ${color_start_page}"
-        fi
-        
-        # Find end: where keyword density drops significantly
-        local previous_density=$best_density
-        for ((page=best_end; page<=refined_end; page++)); do
-            pdftotext -f "$page" -l "$((page + 5))" -layout "${RESOLVE_MANUAL}" "${TEMP_DIR}/endcheck_${page}.txt" 2>/dev/null || continue
-            
-            local hits=0
-            while IFS= read -r keyword; do
-                local count
-                count=$(rg -i -c "$keyword" "${TEMP_DIR}/endcheck_${page}.txt" 2>/dev/null || echo "0")
-                hits=$((hits + count))
-            done < "${keywords_file}"
-            
-            local density=$((hits / 5))
-            
-            if [[ $density -lt $((previous_density / 2)) ]]; then
-                color_end_page=$page
-                log_message "INFO" "detect" "Found Color section end: page ${color_end_page} (density dropped to ${density})"
-                break
-            fi
-        done
-        
-        if [[ -z "$color_end_page" ]]; then
-            color_end_page=$refined_end
-            log_message "WARN" "detect" "Could not find precise end, using refined window end: ${color_end_page}"
-        fi
-        
-        # Write detection report
-        local report_file="${TEMP_DIR}/detection-report.md"
-        cat > "${report_file}" <<EOF
-# Color Section Detection Report
-
-## Manual Information
-- File: ${RESOLVE_MANUAL}
-- Total pages: ${total_pages}
-
-## Detection Results
-- **Start page:** ${color_start_page}
-- **End page:** ${color_end_page}
-- **Page count:** $((color_end_page - color_start_page + 1))
-- **Best keyword density:** ${best_density} hits/page
-- **Detection threshold:** ${MIN_KEYWORD_DENSITY} hits/page
-
-## Keywords Used
-- Config file: ${CONFIG_FILE}
-- Keyword count: ${keyword_count}
-
-## Notes
-$(if [[ $best_density -lt $MIN_KEYWORD_DENSITY ]]; then
-    echo "- ⚠️ Keyword density below threshold; results may need manual review"
-fi)
-EOF
-        
-        log_message "INFO" "detect" "Detection complete: pages ${color_start_page}-${color_end_page}"
-        log_message "INFO" "detect" "Detection report: ${report_file}"
-        
-        # Export for use in next stages
-        echo "${color_start_page}" > "${TEMP_DIR}/start_page"
-        echo "${color_end_page}" > "${TEMP_DIR}/end_page"
+        # Export for use in next stages (compatible with existing slice_manual)
+        echo "${START_PAGE}" > "${TEMP_DIR}/start_page"
+        echo "${END_PAGE}" > "${TEMP_DIR}/end_page"
     }
 
     slice_manual() {
-        log_message "INFO" "slice" "Slicing Color section from manual..."
+        log_message "INFO" "slice" "Slicing section from manual..."
         
         local start_page
         local end_page
@@ -379,7 +220,7 @@ EOF
     }
 
     extract_text() {
-        log_message "INFO" "extract" "Extracting text from Color section PDF..."
+        log_message "INFO" "extract" "Extracting text from section PDF..."
         
         if ! pdftotext -layout "${COLOR_PDF}" "${COLOR_TXT}"; then
             die "Failed to extract text with pdftotext"
@@ -431,72 +272,77 @@ This document provides a structured overview of DaVinci Resolve's Color page, ex
 
 DIGEST_HEADER
         
-        echo "## Document Information" >> "${DIGEST_MD}"
-        echo "" >> "${DIGEST_MD}"
-        echo "- **Source:** DaVinci Resolve Manual (Color section)" >> "${DIGEST_MD}"
-        echo "- **Extracted pages:** ${start_page}-${end_page} (PDF numbering)" >> "${DIGEST_MD}"
-        echo "- **Generated:** $(date '+%Y-%m-%d %H:%M:%S')" >> "${DIGEST_MD}"
-        echo "- **Total pages in section:** $((end_page - start_page + 1))" >> "${DIGEST_MD}"
-        echo "" >> "${DIGEST_MD}"
-        echo "---" >> "${DIGEST_MD}"
-        echo "" >> "${DIGEST_MD}"
+        {
+            echo "## Document Information"
+            echo ""
+            echo "- **Source:** DaVinci Resolve Manual (Color section)"
+            echo "- **Extracted pages:** ${start_page}-${end_page} (PDF numbering)"
+            echo "- **Generated:** $(date '+%Y-%m-%d %H:%M:%S')"
+            echo "- **Total pages in section:** $((end_page - start_page + 1))"
+            echo ""
+            echo "---"
+            echo ""
+        } >> "${DIGEST_MD}"
         
         # Add sections with placeholders
         while IFS= read -r section; do
             [[ -z "$section" ]] && continue
-            echo "## ${section}" >> "${DIGEST_MD}"
-            echo "" >> "${DIGEST_MD}"
-            echo "*TODO: Summarize key concepts and workflows from this section.*" >> "${DIGEST_MD}"
-            echo "" >> "${DIGEST_MD}"
-            echo "**Page references:** (To be filled during manual review)" >> "${DIGEST_MD}"
-            echo "" >> "${DIGEST_MD}"
-            echo "---" >> "${DIGEST_MD}"
-            echo "" >> "${DIGEST_MD}"
+            {
+                echo "## ${section}"
+                echo ""
+                echo "*TODO: Summarize key concepts and workflows from this section.*"
+                echo ""
+                echo "**Page references:** (To be filled during manual review)"
+                echo ""
+                echo "---"
+                echo ""
+            } >> "${DIGEST_MD}"
         done <<< "$sections"
         
         # Add mermaid diagram placeholders
-        echo "## Diagrams" >> "${DIGEST_MD}"
-        echo "" >> "${DIGEST_MD}"
-        
-        echo "### Node Graph Architecture" >> "${DIGEST_MD}"
-        echo "" >> "${DIGEST_MD}"
-        echo "<!-- TODO: Generate mermaid flowchart showing:" >> "${DIGEST_MD}"
-        echo "     - Serial vs parallel node connections" >> "${DIGEST_MD}"
-        echo "     - Input/output signal flow" >> "${DIGEST_MD}"
-        echo "     - Node types and their relationships" >> "${DIGEST_MD}"
-        echo "     See pages TBD -->" >> "${DIGEST_MD}"
-        echo "" >> "${DIGEST_MD}"
-        
-        echo "### Color Pipeline" >> "${DIGEST_MD}"
-        echo "" >> "${DIGEST_MD}"
-        echo "<!-- TODO: Generate mermaid diagram showing:" >> "${DIGEST_MD}"
-        echo "     - Input → Color Space Transform → Grading → Output Transform" >> "${DIGEST_MD}"
-        echo "     - Where LUTs fit in the pipeline" >> "${DIGEST_MD}"
-        echo "     See pages TBD -->" >> "${DIGEST_MD}"
-        echo "" >> "${DIGEST_MD}"
-        
-        echo "### Scopes Decision Helper" >> "${DIGEST_MD}"
-        echo "" >> "${DIGEST_MD}"
-        echo "<!-- TODO: Generate decision tree/flowchart:" >> "${DIGEST_MD}"
-        echo "     - Which scope for which task (Waveform vs Parade vs Vectorscope)" >> "${DIGEST_MD}"
-        echo "     - When to use Histogram vs Waveform" >> "${DIGEST_MD}"
-        echo "     See pages TBD -->" >> "${DIGEST_MD}"
-        echo "" >> "${DIGEST_MD}"
-        
-        echo "### LUT Placement Options" >> "${DIGEST_MD}"
-        echo "" >> "${DIGEST_MD}"
-        echo "<!-- TODO: Generate diagram showing:" >> "${DIGEST_MD}"
-        echo "     - Timeline vs Clip vs Node LUT placement" >> "${DIGEST_MD}"
-        echo "     - Order of operations" >> "${DIGEST_MD}"
-        echo "     See pages TBD -->" >> "${DIGEST_MD}"
-        echo "" >> "${DIGEST_MD}"
-        
-        echo "---" >> "${DIGEST_MD}"
-        echo "" >> "${DIGEST_MD}"
-        
-        # Add glossary
-        echo "## Glossary" >> "${DIGEST_MD}"
-        echo "" >> "${DIGEST_MD}"
+        {
+            echo "## Diagrams"
+            echo ""
+            
+            echo "### Node Graph Architecture"
+            echo ""
+            echo "<!-- TODO: Generate mermaid flowchart showing:"
+            echo "     - Serial vs parallel node connections"
+            echo "     - Input/output signal flow"
+            echo "     - Node types and their relationships"
+            echo "     See pages TBD -->"
+            echo ""
+            
+            echo "### Color Pipeline"
+            echo ""
+            echo "<!-- TODO: Generate mermaid diagram showing:"
+            echo "     - Input → Color Space Transform → Grading → Output Transform"
+            echo "     - Where LUTs fit in the pipeline"
+            echo "     See pages TBD -->"
+            echo ""
+            
+            echo "### Scopes Decision Helper"
+            echo ""
+            echo "<!-- TODO: Generate decision tree/flowchart:"
+            echo "     - Which scope for which task (Waveform vs Parade vs Vectorscope)"
+            echo "     - When to use Histogram vs Waveform"
+            echo "     See pages TBD -->"
+            echo ""
+            
+            echo "### LUT Placement Options"
+            echo ""
+            echo "<!-- TODO: Generate diagram showing:"
+            echo "     - Timeline vs Clip vs Node LUT placement"
+            echo "     - Order of operations"
+            echo "     See pages TBD -->"
+            echo ""
+            
+            echo "---"
+            echo ""
+            
+            echo "## Glossary"
+            echo ""
+        } >> "${DIGEST_MD}"
         
         local terms
         terms=$("${CONFIG_READER}" --format json --config "${CONFIG_FILE}" | python -c "
@@ -522,10 +368,12 @@ CDL")
         
         while IFS= read -r term; do
             [[ -z "$term" ]] && continue
-            echo "### ${term}" >> "${DIGEST_MD}"
-            echo "" >> "${DIGEST_MD}"
-            echo "*Definition and usage notes to be filled. Page references: TBD*" >> "${DIGEST_MD}"
-            echo "" >> "${DIGEST_MD}"
+            {
+                echo "### ${term}"
+                echo ""
+                echo "*Definition and usage notes to be filled. Page references: TBD*"
+                echo ""
+            } >> "${DIGEST_MD}"
         done <<< "$terms"
         
         log_message "INFO" "digest" "Created ${DIGEST_MD}"
@@ -545,8 +393,8 @@ main() {
     validate_inputs
     log_tool_versions
     
-    # Stage 2: Detect
-    detect_color_section
+    # Stage 2: Load page boundaries (provided externally, not auto-detected)
+    load_page_boundaries
     
     # Stage 3: Slice
     slice_manual

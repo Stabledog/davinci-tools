@@ -1,79 +1,20 @@
 # color-keywords.toml
-# Configuration for DaVinci Resolve Color section detection and digest generation
+# Configuration for DaVinci Resolve Color section digest generation
 #
-# This file defines keyword lists and detection parameters for automatically
-# identifying and extracting the Color section from the DaVinci Resolve manual.
+# NOTE: Automatic boundary detection was removed. Page boundaries must be
+# provided externally via environment variables or metadata file.
+# This file now only contains digest generation configuration.
 
-[detection]
-# Minimum number of keyword hits in sliding window to consider page part of Color section
-min_keyword_density = 5
-
-# Sliding window size (pages) for keyword density calculation
-window_size = 10
-
-# Keywords that must appear near bookmarks for high-confidence detection
-bookmark_match_keywords = ["Color Page", "Color Grading", "Color"]
-
-[keywords]
-# Primary keywords for Color section identification
-# Higher weight terms appear more frequently in Color-specific content
-primary = [
-    "Color Page",
-    "Color",
-    "Grading",
-    "Node",
-    "Nodes",
-    "Primary Correction",
-    "Secondary Correction",
-]
-
-# Technical terms specific to color grading workflows
-technical = [
-    "LUT",
-    "Power Window",
-    "Qualifier",
-    "Tracker",
-    "Color Warper",
-    "Curves",
-    "Log Wheels",
-    "Offset",
-    "Lift",
-    "Gamma",
-    "Gain",
-]
-
-# Scope and measurement tools
-scopes = [
-    "Scopes",
-    "Waveform",
-    "Parade",
-    "Vectorscope",
-    "Histogram",
-]
-
-# Color management and technical standards
-color_management = [
-    "HDR",
-    "ACES",
-    "DaVinci Color Management",
-    "DCM",
-    "Color Space",
-    "YRGB",
-    "PQ",
-    "HLG",
-    "Rec.709",
-    "Rec.2020",
-]
-
-# Organizational and workflow terms
-workflow = [
-    "Gallery",
-    "Still",
-    "CDL",
-    "Timeline Grade",
-    "Clip Grade",
-    "Node Tree",
-]
+# ==============================================================================
+# AUTOMATIC DETECTION CONFIGURATION - REMOVED
+# ==============================================================================
+# The following sections were removed as part of strategy shift:
+#   [detection] - keyword density thresholds, window size, bookmark keywords
+#   [keywords]  - primary, technical, scopes, color_management, workflow lists
+#
+# These were used for automatic section boundary detection via keyword density
+# analysis, which proved unreliable across manual versions.
+# ==============================================================================
 
 [glossary]
 # Terms to extract and reference in the digest glossary

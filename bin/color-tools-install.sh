@@ -53,8 +53,9 @@ Required tools:
     - Python 3.13+
     - poppler (pdftotext, pdfinfo)
     - qpdf
-    - ripgrep (rg)
     - coreutils (standard UNIX utilities)
+
+Note: ripgrep was removed (automatic detection disabled)
 
 Install method: Scoop package manager for Windows
 EOF
@@ -120,7 +121,7 @@ EOF
         if ! check_command pdftotext poppler; then all_ok=false; fi
         if ! check_command pdfinfo poppler; then all_ok=false; fi
         if ! check_command qpdf qpdf; then all_ok=false; fi
-        if ! check_command rg ripgrep; then all_ok=false; fi
+        # NOTE: ripgrep removed (automatic detection disabled)
         
         # coreutils typically present in Git Bash, but check key commands
         if ! check_command awk; then all_ok=false; fi
@@ -160,11 +161,7 @@ EOF
             needs_install=true
         fi
         
-        # ripgrep
-        if ! check_command rg ripgrep; then
-            echo "Will install: ripgrep"
-            needs_install=true
-        fi
+        # NOTE: ripgrep removed (automatic detection disabled)
         
         if [[ "$needs_install" == "false" ]]; then
             echo "All tools already installed!"
@@ -192,10 +189,7 @@ EOF
             scoop install qpdf || die "Failed to install qpdf"
         fi
         
-        if ! check_command rg ripgrep; then
-            echo "Installing ripgrep..."
-            scoop install ripgrep || die "Failed to install ripgrep"
-        fi
+        # NOTE: ripgrep removed (automatic detection disabled)
         
         echo ""
         echo "Installation complete!"
@@ -218,9 +212,7 @@ EOF
             qpdf --version 2>&1 | head -n1 | sed 's/^/  /'
         fi
         
-        if command -v rg &>/dev/null; then
-            rg --version 2>&1 | head -n1 | sed 's/^/  /'
-        fi
+        # NOTE: ripgrep removed (automatic detection disabled)
     }
 
 }
