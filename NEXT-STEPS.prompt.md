@@ -1,96 +1,239 @@
-# Implementation Prompt: Color-Grading Digest Toolchain (Windows, Bash)
+# Implementation Prompt: Documentation Digest Toolchain (Windows, Bash)
 
-Use this prompt verbatim to guide an implementation session in a clean context. Goal: produce a Bash-based, Windows-friendly tool in `bin/` that automatically slices the DaVinci Resolve manual to the Color section, extracts text-only, and generates a digest stub with page refs and mermaid placeholders. No images exported; reference images by page number.
+Use this prompt verbatim to guide an implementation session in a clean context. Goal: produce a Bash-based, Windows-friendly tool in `bin/` that processes project documentation using user-provided metadata to slice PDFs into sections, then uses AI to summarize and index the content for LLM consumption.
 
 ## Scope and Constraints
 - Environment: Windows, Git Bash shell. Prefer Scoop-installed CLI tools; no WSL required.
-- Repo norms: follow `AGENTS.md` (version-specific, user observations are ground truth), respect `KNOWN_LIES.md` and use `TEMPLATE-FAILURE.md` for logging incorrect or missing guidance. Don’t invent Resolve features; note Resolve version/date from the manual.
+- Repo norms: follow `AGENTS.md` (version-specific, user observations are ground truth), respect `KNOWN_LIES.md` and use `TEMPLATE-FAILURE.md` for logging incorrect or missing guidance. Don't invent Resolve features; note Resolve version/date from the manual.
 - Manual location: `docs/DaVinci_Resolve_Manual.pdf` (symlink to `C:/Program Files/Blackmagic Design/DaVinci Resolve/Documents/DaVinci Resolve.pdf`).
-- Outputs are text-only plus page references. Keep visuals as mermaid placeholders and page numbers.
-
+- **Strategy shift:** User provides metadata file specifying section boundaries; automatic section detection is deferred to a future project.
+- Primary output: AI-generated summaries and indexes optimized for LLM consultants.
 ## Required Tools (install via Scoop)
-- poppler (`pdftotext`, `pdfinfo`, `pdfimages` if needed later)
+- poppler (`pdftotext`, `pdfinfo`)
 - qpdf (preferred for slicing); mutool (mupdf-tools) is an acceptable fallback
-- ripgrep (`rg`) for keyword scanning
 - coreutils (for standard UNIX utils, typically present in Git Bash)
-- Python 3.13 or greater (for TOML config parsing)
+- Python 3.13 or greater (for metadata parsing and AI orchestration)
+- jq (for JSON manipulation)
 
-Capture tool versions in the run log (e.g., `pdftotext -v`, `qpdf --version`, `rg --version`, `python --version`).
+Capture tool versions in the run log (e.g., `pdftotext -v`, `qpdf --version`, `python --version`).
 
 **Tool Installation Pattern:**
-- `bin/color-tools-install.sh` supports `--check` mode (returns 0 if all tools present, non-zero otherwise)
-- Main script (`color-digest.sh`) runs install script with `--check` at startup
+- `bin/doc-tools-install.sh` supports `--check` mode (returns 0 if all tools present, non-zero otherwise)
+- Main script (`bin/doc-digest.sh`) runs install script with `--check` at startup
 - On check failure: print clear advisory message, exit non-zero, instruct user to run install script manually
 - No just-in-time installation; humans control when dependencies are installed
 
+## Metadata File Schema
+User provides a metadata file describing how to slice the documentation. 
+
+**Format:** TOML (`.toml`) or JSON (`.json`)
+
+**Location:** `projects__/<project-name>/doc-metadata.toml` (or `.json`)
+
+**Schema:**
+```toml
+[document]
+source_pdf = "docs/DaVinci_Resolve_Manual.pdf"  # Absolute or workspace-relative path
+title = "DaVinci Resolve Manual"
+version = "19.1"  # Optional: product version, if known
+date = "2024-12"  # Optional: manual date, if known
+
+[[sections]]
+name = "color-grading"
+title = "Color Grading"
+description = "Color page workflow, nodes, curves, scopes, LUTs, and color management"
+start_page = 1500  # PDF page number (1-indexed)
+end_page = 1850    # PDF page number (inclusive)
+priority = "high"  # Optional: "high" | "medium" | "low" - guides AI processing order
+
+[[sections]]
+name = "fusion"
+title = "Fusion VFX"
+description = "Fusion page compositing and visual effects"
+start_page = 2000
+end_page = 2300
+priority = "medium"
+
+# Add more sections as needed
+```
+
+**Validation rules:**
+- `source_pdf` must exist and be readable
+- `start_page` and `end_page` must be valid PDF page numbers (within document bounds)
+- `end_page` must be ≥ `start_page`
+- `name` must be filesystem-safe (used in output filenames)
+- Section page ranges may overlap (tool does not enforce exclusivity)
+
 ## Configuration
-- **Format:** TOML (`bin/color-keywords.toml`)
-- **Parser:** Python 3.13+ required; use `bin/config-reader.py` helper for TOML operations
-- **Default keyword list:** `Color Page`, `Color`, `Grading`, `Node`, `Nodes`, `LUT`, `Power Window`, `Qualifier`, `Scopes`, `Waveform`, `Parade`, `Vectorscope`, `HDR`, `ACES`, `DaVinci Color Management`, `DCM`
+- **Metadata file location:** Specified via `--metadata` flag or environment variable `DOC_METADATA_FILE`
+- **AI provider:** Configurable (OpenAI, Anthropic, local models). Default: use available provider in environment.
 - **Overrideable via environment variables:**
-  - Manual path
-  - Output paths
-  - Keyword config file path
-  - Detection thresholds (minimum keyword hit density, sliding window size, etc.)
-- **Detection thresholds:** Define all numeric constants in script header section for easy tuning; values are experimental and subject to trial-and-error refinement
+  - `DOC_METADATA_FILE` - path to metadata file
+  - `AI_PROVIDER` - AI service to use (openai|anthropic|local)
+  - `AI_MODEL` - specific model name (e.g., gpt-4, claude-3-5-sonnet)
+  - `AI_MAX_TOKENS` - max tokens for AI responses
+  - `OUTPUT_DIR` - base directory for outputs (default: `docs/`)
+  - `LOG_DIR` - directory for run logs (default: `logs/`)
 
 ## Pipeline Stages (automate end-to-end)
-1) **Validate inputs**
-   - Confirm `docs/DaVinci_Resolve_Manual.pdf` exists (follow symlink).
-   - Record manual file size and `pdfinfo` summary (page count, creation/mod dates).
 
-2) **Outline and keyword detection**
-   - Extract outline/bookmarks (prefer `qpdf --show-object=trailer --json` or `mutool show -e outline`).
-   - **Bookmark extraction failure = fatal error; fail loudly, no fallback attempts.**
-   - Run targeted text extraction on sampled ranges to map printed vs PDF page numbers if possible.
-   - Use `pdftotext -f N -l M` + `rg` with keyword list to find candidate start/end for the Color section.
-   - Heuristic: choose the first strong hit near a bookmark titled like "Color" (or similar) as start; end at the next top-level bookmark after Color, or where keyword density drops below threshold over a sliding window.
-   - **Page numbering:** Use PDF page numbers (zero-indexed or one-indexed as tool reports); note printed page numbers only if trivially derivable from TOC.
-   - **Keyword density issues:** TBD; if detection confidence is low, document loudly in logs and proceed (trial and error will guide future refinements).
-   - Emit a detection report (markdown) listing: chosen start/end pages (PDF numbering), matched bookmarks, keyword hit counts by page.
+### 1) **Validate inputs**
+   - Load and parse metadata file (TOML or JSON)
+   - Validate schema: required fields present, types correct
+   - Confirm source PDF exists and is readable
+   - Get PDF info: page count, creation/mod dates, file size
+   - Validate all section page ranges against PDF page count
+   - Record manual metadata (version, date from PDF properties or metadata file)
 
-3) **Slice the manual**
-   - Use qpdf: `qpdf --pages source.pdf START-END -- output.pdf` to create `docs/DaVinci_Resolve_Manual.color-grading.pdf`.
-   - If qpdf unavailable: fail with clear error (should have been caught by install check).
+### 2) **Slice the manual**
+   - For each section in metadata:
+     - Use qpdf: `qpdf --pages source.pdf START-END -- output.pdf`
+     - Output naming: `docs/<source-name>.<section-name>.pdf`
+       - Example: `docs/DaVinci_Resolve_Manual.color-grading.pdf`
+   - If qpdf unavailable: fail with clear error (should have been caught by install check)
+   - Record slice operations and output paths in run log
 
-4) **Extract text (no images)**
-   - `pdftotext -layout docs/DaVinci_Resolve_Manual.color-grading.pdf docs/DaVinci_Resolve_Manual.color-grading.txt`.
-   - Keep note: images are referenced by page; no export.
+### 3) **Extract text**
+   - For each sliced PDF:
+     - `pdftotext -layout <sliced-pdf> <text-output>`
+     - Output naming: `docs/<source-name>.<section-name>.txt`
+       - Example: `docs/DaVinci_Resolve_Manual.color-grading.txt`
+   - Verify text extraction produced non-empty output
+   - Record character/line counts for each extracted section
 
-5) **Generate digest stub** → `docs/DaVinci_Resolve_Manual.digest.color-grading.md`
-   - Include: intro, Color page layout/workflow, primary/secondary tools, nodes, curves/advanced tools, scopes, LUTs, color management/ACES, HDR notes, practical workflows/troubleshooting, glossary, and mermaid diagram placeholders.
-   - For each section: 1–2 sentence placeholder summary + page refs from the sliced PDF (use PDF page numbers; printed page numbers only if easily derivable).
-   - Glossary: terms (Node, Primary, Secondary, Qualifier, Power Window, Tracker, LUT, ACES, HDR/PQ/HLG, Color Warper, Gallery, CDL) with page refs.
-   - **Mermaid placeholders:** Commented sections marking where semantic diagrams should go (e.g., node graph, color pipeline, scopes decision helper, LUT placement). Format as `<!-- TODO: Generate mermaid diagram ... See pages X-Y -->`. These are for future tooling; automatic diagram generation requires semantic understanding beyond text extraction (2nd-pass tool).
+### 4) **AI-powered summarization and indexing**
+   This is the core value-add. For each section, use AI to:
 
-6) **Logging and reproducibility**
+   **A. Generate structured summary**
+   - Identify key concepts, workflows, and features
+   - Extract glossary terms with definitions
+   - Note version-specific features or caveats
+   - Highlight common pitfalls or troubleshooting steps
+   - Create hierarchical outline of topics covered
+   - Output format: Markdown with semantic structure
+
+   **B. Create LLM-optimized index**
+   - Generate searchable concept map
+   - Extract technical terms and their contexts
+   - Build cross-references between related concepts
+   - Identify user intent patterns ("how to...", "what is...", "troubleshooting...")
+   - Tag content by topic clusters
+   - Output format: JSON or YAML for programmatic access
+
+   **C. Generate Mermaid diagrams** (where applicable)
+   - Identify visual concepts (workflows, hierarchies, state machines)
+   - Generate mermaid diagram definitions
+   - Embed diagrams in summary markdown
+   - Prefer: flowcharts for workflows, graphs for hierarchies, sequence diagrams for operations
+
+   **AI Prompt Strategy:**
+   - Use structured prompts with clear roles and output format requirements
+   - Provide document version/date context to AI
+   - Request AI to note confidence level for version-specific claims
+   - Ask AI to flag ambiguous or unclear source material
+   - Use multi-stage processing: 1) extract structure, 2) summarize content, 3) generate diagrams
+
+   **Output files per section:**
+   - `docs/<source-name>.digest.<section-name>.md` - Human-readable summary with diagrams
+   - `docs/<source-name>.index.<section-name>.json` - Machine-readable index for LLM retrieval
+
+### 5) **Generate consolidated artifacts**
+   After processing all sections:
+
+   **A. Master index**
+   - Combine all section indexes into single searchable structure
+   - Output: `docs/<source-name>.master-index.json`
+
+   **B. Cross-section references**
+   - Identify concepts mentioned across multiple sections
+   - Build navigation graph
+   - Output: `docs/<source-name>.cross-references.json`
+
+   **C. Quick reference guide**
+   - Distill summaries into compact cheat sheet
+   - Focus on high-frequency lookup patterns
+   - Output: `docs/<source-name>.quick-reference.md`
+
+### 6) **Logging and reproducibility**
    - **Format:** Unix-style text logs: `YYYY-MM-DD HH:MM:SS [category] [severity] message`
-   - **Location:** `logs/color-digest-run-TIMESTAMP.log` (create `logs/` directory if missing)
-   - **Content:** Manual metadata (version/date, page count), tool versions, keyword config file used, detected page bounds, command arguments executed, outputs produced
-   - Note any uncertainties (e.g., ambiguous boundaries, low keyword density, detection confidence issues)
+   - **Location:** `logs/doc-digest-run-YYYYMMDD-HHMMSS.log` (create `logs/` directory if missing)
+   - **Content:** 
+     - Metadata file used (checksum or hash for versioning)
+     - Source PDF metadata (version/date, page count, file size)
+     - Tool versions
+     - AI provider/model used
+     - Section processing order and timing
+     - Character/token counts for AI requests
+     - Output files generated with sizes
+     - Any errors, warnings, or AI-flagged ambiguities
 
 ## Acceptance Criteria
-- Runs under Git Bash on Windows with Scoop-installed deps; fails fast with clear errors if deps/manual missing.
-- Produces all artifacts on one run (slice PDF, text export, digest stub, run log).
-- Digest stub contains page references and mermaid placeholders; no images embedded.
-- Keyword list is external/configurable; reruns are deterministic given same manual and config.
+- Runs under Git Bash on Windows with Scoop-installed deps; fails fast with clear errors if deps/manual/metadata missing.
+- Processes all sections defined in metadata file in one run.
+- Generates per-section summaries, indexes, and diagrams.
+- Produces consolidated master index and cross-references.
+- Summaries are structured, concise, and LLM-friendly.
+- Diagrams are valid Mermaid syntax.
+- All outputs are deterministic given same inputs (except AI non-determinism, which should be minimal with temperature=0).
+- Run log captures full provenance for reproducibility.
 
 ## File/Path Conventions
-- `bin/color-digest.sh` (main entrypoint)
-- `bin/color-tools-install.sh` (tool installation script with `--check` mode)
-- `bin/config-reader.py` (Python helper for TOML parsing; requires Python 3.13+)
-- `bin/color-keywords.toml` (keyword configuration in TOML format)
-- `docs/DaVinci_Resolve_Manual.color-grading.pdf` (sliced PDF, Color section only)
-- `docs/DaVinci_Resolve_Manual.color-grading.txt` (extracted text from sliced PDF)
-- `docs/DaVinci_Resolve_Manual.digest.color-grading.md` (digest stub with placeholders and page refs; note uppercase 'V' in DaVinci)
-- `logs/color-digest-run-YYYYMMDD-HHMMSS.log` (Unix-style text log)
+- `bin/doc-digest.sh` (main entrypoint)
+- `bin/doc-tools-install.sh` (tool installation script with `--check` mode)
+- `bin/doc-ai-processor.py` (Python helper for AI orchestration)
+- `projects__/<project-name>/doc-metadata.toml` (user-provided metadata)
+- `docs/<source-name>.<section-name>.pdf` (sliced PDF sections)
+- `docs/<source-name>.<section-name>.txt` (extracted text)
+- `docs/<source-name>.digest.<section-name>.md` (AI-generated summary with diagrams)
+- `docs/<source-name>.index.<section-name>.json` (AI-generated index)
+- `docs/<source-name>.master-index.json` (consolidated index)
+- `docs/<source-name>.cross-references.json` (cross-section links)
+- `docs/<source-name>.quick-reference.md` (distilled cheat sheet)
+- `logs/doc-digest-run-YYYYMMDD-HHMMSS.log` (Unix-style text log)
+
+## Example: DaVinci Resolve Color Grading
+Given this metadata file at `projects__/legend_of_halle_/doc-metadata.toml`:
+```toml
+[document]
+source_pdf = "docs/DaVinci_Resolve_Manual.pdf"
+title = "DaVinci Resolve Manual"
+version = "19.1"
+
+[[sections]]
+name = "color-grading"
+title = "Color Grading"
+description = "Color page workflow and tools"
+start_page = 1500
+end_page = 1850
+priority = "high"
+```
+
+Running `bin/doc-digest.sh --metadata projects__/legend_of_halle_/doc-metadata.toml` produces:
+- `docs/DaVinci_Resolve_Manual.color-grading.pdf`
+- `docs/DaVinci_Resolve_Manual.color-grading.txt`
+- `docs/DaVinci_Resolve_Manual.digest.color-grading.md` (AI summary with Mermaid diagrams)
+- `docs/DaVinci_Resolve_Manual.index.color-grading.json` (AI-generated index)
+- `docs/DaVinci_Resolve_Manual.master-index.json` (since only one section)
+- `docs/DaVinci_Resolve_Manual.quick-reference.md`
+- `logs/doc-digest-run-YYYYMMDD-HHMMSS.log`
 
 ## Testing Checklist (for the implementer)
-- Run the script once; verify artifacts exist and page ranges are plausible.
-- Spot-check that the detected start/end pages include the Color page intro and exclude non-Color chapters.
-- Confirm digest stub has headings, placeholders, and page refs filled.
-- Verify run log records tool versions and chosen ranges.
+- Create minimal metadata file with one section
+- Run script; verify all artifacts generated
+- Check that sliced PDF contains expected content
+- Verify text extraction is readable
+- Review AI-generated summary for accuracy and structure
+- Validate Mermaid diagrams render correctly
+- Confirm index JSON is well-formed and contains expected entries
+- Check run log captures all operations and metadata
+- Test error handling: invalid metadata, missing PDF, out-of-range pages
+- Test with multiple sections: verify consolidated outputs
 
 ## Notes for Future Extensions
-- Optional image extraction/OCR can be added later; keep hooks in the script but disabled by default.
-- When manual versions change, rerun with the same script and compare run logs to spot boundary shifts.
+- **Image extraction and analysis:** AI-powered diagram extraction from PDF images (OCR + vision models)
+- **Automatic boundary detection:** Restore keyword-based section detection as optional mode when metadata incomplete
+- **Multi-document support:** Process multiple PDFs in parallel with shared index
+- **Interactive query mode:** CLI tool that uses generated indexes to answer user questions
+- **Incremental updates:** Detect changed sections and reprocess only deltas
+- **Quality metrics:** AI self-assessment of summary quality and coverage
+- **Export formats:** HTML, EPUB, or other formats for digest output
