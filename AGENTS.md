@@ -71,3 +71,10 @@ Agents should not:
 - Invent Resolve features or menus
 - Assume tutorials are current
 - Treat chat output as authoritative without repo-backed evidence
+
+---
+
+## Additional context
+
+- The `bin/CONTEXT.md` file has additional expectations
+- Generarted shell scripts must conform to the `bin/SHELL_SCRIPT_TEMPLATE.sh` standard
