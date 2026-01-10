@@ -1,0 +1,75 @@
+# doc-metadata.toml
+# Template for document boundary specification
+# Copy to projects__/<your-project>/doc-metadata.toml and customize
+
+[document]
+# Path to source PDF (workspace-relative or absolute)
+source_pdf = "docs/DaVinci_Resolve_Manual.pdf"
+
+# Human-readable document title
+title = "DaVinci Resolve Manual"
+
+# Optional: Product version (if known)
+version = "19.1"
+
+# Optional: Manual date (YYYY-MM or YYYY-MM-DD)
+date = "2024-12"
+
+# Optional: DaVinci Resolve version (if applicable)
+resolve_version = "19.1"
+
+
+# ==============================================================================
+# Sections to extract
+# ==============================================================================
+# Add one [[sections]] block per topic.
+# 
+# How to find page numbers:
+#   1. Open PDF in viewer (Acrobat, Sumatra, browser, etc.)
+#   2. Navigate to section start, note PDF page number from viewer
+#      - Use PDF page index (e.g., "Page 1500"), NOT document page number
+#   3. Navigate to section end, note PDF page number
+#   4. Fill in start_page and end_page below
+#
+# Fields:
+#   name        - Filesystem-safe slug (lowercase, digits, hyphens, underscores)
+#                 Used in output filenames: <source>.<name>.pdf
+#   title       - Human-readable section title
+#   description - Brief description (optional but helpful for AI context)
+#   start_page  - PDF page number (1-indexed, inclusive)
+#   end_page    - PDF page number (1-indexed, inclusive)
+#   priority    - Optional: "high" | "medium" | "low" (default: medium)
+#                 Guides AI processing order
+#
+# Constraints:
+#   - start_page <= end_page
+#   - start_page >= 1
+#   - end_page <= total PDF page count
+#   - name must be unique within this document
+#   - Overlapping page ranges are allowed
+# ==============================================================================
+
+[[sections]]
+name = "color-grading"
+title = "Color Grading"
+description = "Color page workflow, nodes, curves, scopes, LUTs, and color management"
+start_page = 1500
+end_page = 1850
+priority = "high"
+
+[[sections]]
+name = "fusion"
+title = "Fusion VFX"
+description = "Fusion page compositing and visual effects"
+start_page = 2000
+end_page = 2300
+priority = "medium"
+
+# Add more sections as needed...
+# [[sections]]
+# name = "editing"
+# title = "Edit Page"
+# description = "Timeline editing, trimming, transitions, multicam"
+# start_page = 500
+# end_page = 800
+# priority = "medium"

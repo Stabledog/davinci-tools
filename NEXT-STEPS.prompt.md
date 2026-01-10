@@ -1,12 +1,13 @@
 # Implementation Prompt: Documentation Digest Toolchain (Windows, Bash)
 
-Use this prompt verbatim to guide an implementation session in a clean context. Goal: produce a Bash-based, Windows-friendly tool in `bin/` that processes project documentation using user-provided metadata to slice PDFs into sections, then uses AI to summarize and index the content for LLM consumption.
+Use this prompt verbatim to guide an implementation session in a clean context. Goal: produce a Bash-based, Windows-friendly tool in `bin/` that processes **any large PDF documentation** using user-provided metadata to slice PDFs into sections, then uses AI to summarize and index the content for LLM consumption.
 
 ## Scope and Constraints
+- **Generic system:** Works with any PDF (technical manuals, textbooks, specifications, reference docs)
+- **First example:** DaVinci Resolve manual color grading section (test case, not exclusive focus)
 - Environment: Windows, Git Bash shell. Prefer Scoop-installed CLI tools; no WSL required.
-- Repo norms: follow `AGENTS.md` (version-specific, user observations are ground truth), respect `KNOWN_LIES.md` and use `TEMPLATE-FAILURE.md` for logging incorrect or missing guidance. Don't invent Resolve features; note Resolve version/date from the manual.
-- Manual location: `docs/DaVinci_Resolve_Manual.pdf` (symlink to `C:/Program Files/Blackmagic Design/DaVinci Resolve/Documents/DaVinci Resolve.pdf`).
-- **Strategy shift:** User provides metadata file specifying section boundaries; automatic section detection is deferred to a future project.
+- Repo norms: follow `AGENTS.md` (version-specific, user observations are ground truth), respect `KNOWN_LIES.md` and use `TEMPLATE-FAILURE.md` for logging incorrect or missing guidance.
+- **Strategy shift:** User provides metadata file specifying section boundaries; automatic section detection is deferred indefinitely (proven unreliable).
 - Primary output: AI-generated summaries and indexes optimized for LLM consultants.
 ## Required Tools (install via Scoop)
 - poppler (`pdftotext`, `pdfinfo`)
@@ -65,10 +66,10 @@ priority = "medium"
 - Section page ranges may overlap (tool does not enforce exclusivity)
 
 ## Configuration
-- **Metadata file location:** Specified via `--metadata` flag or environment variable `DOC_METADATA_FILE`
+- **Metadata file:** Specified via `--metadata` flag (required)
+- **Section:** Specified via `--section` flag (required)
 - **AI provider:** Configurable (OpenAI, Anthropic, local models). Default: use available provider in environment.
-- **Overrideable via environment variables:**
-  - `DOC_METADATA_FILE` - path to metadata file
+- **Environment variables for AI config:**
   - `AI_PROVIDER` - AI service to use (openai|anthropic|local)
   - `AI_MODEL` - specific model name (e.g., gpt-4, claude-3-5-sonnet)
   - `AI_MAX_TOKENS` - max tokens for AI responses
