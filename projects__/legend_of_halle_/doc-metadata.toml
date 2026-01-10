@@ -5,15 +5,13 @@
 [document]
 source_pdf = "docs/DaVinci_Resolve_Manual.pdf"
 title = "DaVinci Resolve Manual"
-version = "19.1"
-date = "2024-12"
-resolve_version = "19.1"
+version = "20"
+date = "2025-07"
+resolve_version = "20"
 
 # ==============================================================================
 # Color Grading Section
 # ==============================================================================
-# Based on manual inspection of DaVinci Resolve 19.1 manual.
-# Page range verified by manual navigation.
 # Covers: Color page layout, primary/secondary correction, nodes, curves,
 # scopes, LUTs, ACES, HDR grading, and practical workflows.
 # ==============================================================================
@@ -22,6 +20,14 @@ resolve_version = "19.1"
 name = "color-grading"
 title = "Color Grading"
 description = "Comprehensive coverage of the Color page: primary and secondary correction tools, node-based workflows, curves, scopes, LUTs, ACES color management, and HDR grading techniques"
-start_page = 1500
-end_page = 1850
+start_page = 2952
+end_page = 3414
 priority = "high"
+
+[[sections]]
+name = "color-effects"
+title = "Color Effects"
+description = "Special effects available in DaVinci color page"
+start_page = 3415
+end_page = 3456
+priority = "medium"
