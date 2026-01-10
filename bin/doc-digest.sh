@@ -109,78 +109,28 @@ die() {
     parse_metadata() {
     local metadata_file=$1
     
-    log_info "Parsing metadata: $metadata_file"
+    # Note: Do NOT call log functions here as this function's stdout is captured
+    # Caller should log before calling this function
     
     if [[ ! -f "$metadata_file" ]]; then
         die "Metadata file not found: $metadata_file"
     fi
     
-        # Use Python to parse and validate
-        local parse_script
-        #shellcheck disable=2116
-        parse_script=$(cut -c 13- <<-'PYEOF'
-            import sys
-            import json
-            from pathlib import Path
-            
-            metadata_file = Path(sys.argv[1])
-            
-            try:
-                if metadata_file.suffix == ".toml":
-                    try:
-                        import tomli
-                    except ImportError:
-                        try:
-                            import tomllib as tomli
-                        except ImportError:
-                            print("ERROR: TOML support requires tomli. Run: pip install tomli", file=sys.stderr)
-                            sys.exit(1)
-                    
-                    with open(metadata_file, "rb") as f:
-                        data = tomli.load(f)
-                
-                elif metadata_file.suffix == ".json":
-                    with open(metadata_file, "r", encoding="utf-8") as f:
-                        data = json.load(f)
-                
-                else:
-                    print(f"ERROR: Unsupported format: {metadata_file.suffix}", file=sys.stderr)
-                    sys.exit(1)
-                
-                # Validate required fields
-                if "document" not in data:
-                    print("ERROR: Missing 'document' section in metadata", file=sys.stderr)
-                    sys.exit(1)
-                
-                if "source_pdf" not in data["document"]:
-                    print("ERROR: Missing 'source_pdf' in document section", file=sys.stderr)
-                    sys.exit(1)
-                
-                if "sections" not in data or not data["sections"]:
-                    print("ERROR: No sections defined in metadata", file=sys.stderr)
-                    sys.exit(1)
-                
-                # Output as JSON
-                print(json.dumps(data, indent=2))
-            
-            except Exception as e:
-                print(f"ERROR: Failed to parse metadata: {e}", file=sys.stderr)
-                sys.exit(1)
-			PYEOF
-        )
-        
-        if ! METADATA_JSON=$(python -c "$parse_script" "$metadata_file"); then
-            die "Failed to parse metadata file"
+        # Use external Python script to parse and validate
+        local metadata_json
+        if ! metadata_json=$(python "$scriptDir/metadata-parser.py" "$metadata_file" 2>&1); then
+            die "Failed to parse metadata file: $metadata_json"
         fi
         
-        echo "$METADATA_JSON"
+        echo "$metadata_json"
     }
 
     # Validate PDF and get info
     validate_pdf() {
         local pdf_path=$1
         
-        log_info "Validating source PDF: $pdf_path"
+        # Note: Do NOT call log functions here as this function's stdout is captured
+        # Caller should log before calling this function
         
         # Resolve relative path
         if [[ ! "$pdf_path" = /* ]]; then
@@ -198,10 +148,13 @@ die() {
         local page_count
         page_count=$(echo "$pdf_info" | grep "Pages:" | awk '{print $2}')
         
-        log "INFO" "PDF Info:"
-        log "INFO" "  Path: $pdf_path"
-        log "INFO" "  Pages: $page_count"
-        log "INFO" "  Size: $(du -h "$pdf_path" | cut -f1)"
+        # Write info to log file directly to avoid polluting stdout
+        {
+            echo "[$(date +"%Y-%m-%d %H:%M:%S")] [INFO] PDF Info:"
+            echo "[$(date +"%Y-%m-%d %H:%M:%S")] [INFO]   Path: $pdf_path"
+            echo "[$(date +"%Y-%m-%d %H:%M:%S")] [INFO]   Pages: $page_count"
+            echo "[$(date +"%Y-%m-%d %H:%M:%S")] [INFO]   Size: $(du -h "$pdf_path" | cut -f1)"
+        } >> "$LOG_FILE"
         
         echo "$page_count"
     }
@@ -212,7 +165,7 @@ die() {
         local page_count=$2
         local section_filter=$3
         
-        log_section "Validating Sections"
+        # Note: Minimize stdout pollution - this function's output is captured
         
         local sections
         sections=$(echo "$metadata_json" | jq -c '.sections[]')
@@ -243,7 +196,8 @@ die() {
                 die "Section '$name': end_page ($end_page) < start_page ($start_page)"
             fi
             
-            log_info "✓ Section '$name': pages $start_page-$end_page"
+            # Log to file directly
+            echo "[$(date +"%Y-%m-%d %H:%M:%S")] [INFO] ✓ Section '$name': pages $start_page-$end_page" >> "$LOG_FILE"
             valid_sections+=("$section")
         done <<< "$sections"
         
@@ -490,6 +444,7 @@ main() {
     check_dependencies
     
     # Parse and validate metadata
+    log_info "Parsing metadata: $metadata_file"
     local metadata_json
     metadata_json=$(parse_metadata "$metadata_file")
     
@@ -510,10 +465,12 @@ main() {
     fi
     
     # Validate PDF
+    log_info "Validating source PDF: $source_pdf"
     local page_count
     page_count=$(validate_pdf "$source_pdf")
     
     # Validate sections
+    log_section "Validating Sections"
     local valid_sections
     valid_sections=$(validate_sections "$metadata_json" "$page_count" "$section_filter")
     

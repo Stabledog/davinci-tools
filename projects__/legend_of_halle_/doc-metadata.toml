@@ -3,7 +3,7 @@
 # Created: 2026-01-10
 
 [document]
-source_pdf = "docs/DaVinci_Resolve_Manual.pdf"
+source_pdf = "projects__/legend_of_halle_/Davinci_Resolve_Manual.pdf"
 title = "DaVinci Resolve Manual"
 version = "20"
 date = "2025-07"
