@@ -10,7 +10,7 @@ set -ue  # Always default to strict -ue
 # PS4 provides good diagnostics when -x is turned on
 #shellcheck disable=2154
 PS4='$( _0=$?; exec 2>/dev/null; realpath -- "${BASH_SOURCE[0]:-?}:${LINENO} ^$_0 ${FUNCNAME[0]:-?}()=>" ) '
-[[ -n "$DEBUGSH" ]] && set -x # Allows the user to enable debugging output via environment
+[[ -n "${DEBUGSH:-}" ]] && set -x # Allows the user to enable debugging output via environment
 
 scriptName="${scriptName:-"$(command readlink -f -- "$0")"}"
 # (if needed) scriptDir="$(command dirname -- "${scriptName}")"
@@ -28,6 +28,21 @@ die() {
 }
 
 {  # "outer scope braces" -- this block may be very long, but it contains all functions except die() and main() 
+
+    sample_makefile() {
+        # If you need to print lots of text or create file from templates, don't 
+        # use long sequences of 'echo' commands (the code is less maintainable and harder to read)
+        # A here-doc with some creative 'cut' works well:
+        #shellcheck disable=2116
+        cut -c 12- > /tmp/myfile <<- EOF
+            This text will be trimmed on the left by 12 chars
+            because of the cut -c 12- command.  But notice how
+            well formatted it can be
+                and we can indent, and have the indentation show up
+                in the output file.
+            We can also expand vars and do $(echo "shell substitution")
+EOF
+    }
 
     helper_1() {
         local arg1="$1"
