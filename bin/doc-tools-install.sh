@@ -175,6 +175,11 @@ die() {
             log_info "jq already installed"
         fi
         
+        # Install Python packages
+        log_info "Installing required Python packages..."
+        python -m pip install --upgrade pip
+        python -m pip install anthropic openai tomli
+        
         echo
         log_info "Installation complete!"
         echo

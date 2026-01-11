@@ -2,7 +2,7 @@
 # doc-digest.sh - Main orchestrator for documentation digest pipeline
 # AI agents: be sure to check ../AGENTS.md and make changes that conform to ../SHELL_SCRIPT_TEMPLATE.md as a standard.
 # Usage:
-#   doc-digest.sh --metadata <path-to-metadata.toml> [--section <name>]
+#   doc-digest.sh --metadata <path-to-metadata.toml> [--section <name>] [--skip-ai]
 #
 # Processes PDF documentation sections defined in metadata file:
 #   1. Validates inputs (metadata, source PDF, page ranges)
@@ -28,10 +28,11 @@ WORKSPACE_ROOT="$(cd "$scriptDir/.." && pwd)"
 
 # Default configuration
 export OUTPUT_DIR="${OUTPUT_DIR:-$WORKSPACE_ROOT/docs}"
+export OUTPUT_DIR_OVERRIDE="${OUTPUT_DIR_OVERRIDE:-}"  # Track if user explicitly set OUTPUT_DIR
 export LOG_DIR="${LOG_DIR:-$WORKSPACE_ROOT/logs}"
 export AI_PROVIDER="${AI_PROVIDER:-anthropic}"
 export AI_MODEL="${AI_MODEL:-}"
-export AI_MAX_TOKENS="${AI_MAX_TOKENS:-4096}"
+export AI_MAX_TOKENS="${AI_MAX_TOKENS:-16384}"
 
 # Log file
 TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
@@ -282,7 +283,7 @@ die() {
         
         log_info "Processing with AI: $name"
         
-        # Call Python AI processor
+        # Call Python AI processor (stderr stays separate for progress messages)
         local ai_result
         if ! ai_result=$(python "$scriptDir/doc-ai-processor.py" \
             --text-file "$text_file" \
@@ -294,9 +295,14 @@ die() {
             --output-dir "$OUTPUT_DIR" \
             --provider "$AI_PROVIDER" \
             ${AI_MODEL:+--model "$AI_MODEL"} \
-            --max-tokens "$AI_MAX_TOKENS" 2>&1); then
-            die "AI processing failed: $ai_result"
+            --max-tokens "$AI_MAX_TOKENS"); then
+            die "AI processing failed: check log for details"
         fi
+        
+        # Debug: save Python output for forensics (per-section cache for --skip-ai)
+        local cached_response="$OUTPUT_DIR/${source_name}.ai-response.${name}.json"
+        echo "$ai_result" | tail -n1 > "$cached_response"
+        log "DEBUG" "Cached AI response to $cached_response"
         
         # Parse AI result
         local summary_file index_file char_count
@@ -427,6 +433,7 @@ main() {
     set -ue
     local metadata_file=""
     local section_filter=""
+    local skip_ai=false
     
     # Parse arguments
     while [[ $# -gt 0 ]]; do
@@ -439,9 +446,13 @@ main() {
                 section_filter="$2"
                 shift 2
                 ;;
+            --skip-ai)
+                skip_ai=true
+                shift
+                ;;
             *)
                 log_error "Unknown argument: $1"
-                echo "Usage: $0 --metadata <file> [--section <name>]"
+                echo "Usage: $0 --metadata <file> [--section <name>] [--skip-ai]"
                 exit 1
                 ;;
         esac
@@ -449,6 +460,16 @@ main() {
     
     if [[ -z "$metadata_file" ]]; then
         die "Missing required argument: --metadata. Usage: $0 --metadata <file> [--section <name>]"
+    fi
+    
+    # Resolve metadata directory and set output directory relative to it
+    local metadata_dir
+    metadata_dir=$(cd "$(dirname "$metadata_file")" && pwd)
+    
+    # Override OUTPUT_DIR to be in the same directory as metadata file
+    # unless explicitly set by user
+    if [[ -z "${OUTPUT_DIR_OVERRIDE:-}" ]]; then
+        OUTPUT_DIR="$metadata_dir"
     fi
     
     # Setup
@@ -463,8 +484,12 @@ main() {
     # Check dependencies
     check_dependencies
     
-    # Check AI connection before doing expensive work
-    check_ai_connection
+    # Check AI connection before doing expensive work (skip if using cached)
+    if [[ "$skip_ai" != "true" ]]; then
+        check_ai_connection
+    else
+        log_warn "Skipping AI processing - using cached results"
+    fi
     
     # Parse and validate metadata
     log_info "Parsing metadata: $metadata_file"
@@ -534,16 +559,43 @@ main() {
             die "Failed to process section: $name"
         fi
         
-        # Process with AI
-        local ai_result
-        if ! ai_result=$(process_with_ai "$text_file" "$section" "$source_name" "$doc_version"); then
-            die "Failed to process section: $name"
-        fi
-        
-        # Collect output files
+        # Process with AI or use cached results
         local summary_file index_file
-        summary_file=$(echo "$ai_result" | jq -r '.summary_file')
-        index_file=$(echo "$ai_result" | jq -r '.index_file')
+        if [[ "$skip_ai" == "true" ]]; then
+            # Look for cached AI response JSON (not the final output files)
+            local cached_response="$OUTPUT_DIR/${source_name}.ai-response.${name}.json"
+            
+            if [[ ! -f "$cached_response" ]]; then
+                die "Cached AI response not found: $cached_response\n       Run without --skip-ai first to generate it."
+            fi
+            
+            log_info "Using cached AI response: $cached_response"
+            
+            # Extract file paths from cached response (same as normal flow)
+            summary_file=$(jq -r '.summary_file' "$cached_response")
+            index_file=$(jq -r '.index_file' "$cached_response")
+            
+            # Verify the Python script actually created these files
+            if [[ ! -f "$summary_file" ]]; then
+                log_warn "Summary file missing: $summary_file (Python script may have failed)"
+            fi
+            if [[ ! -f "$index_file" ]]; then
+                log_warn "Index file missing: $index_file (Python script may have failed)"
+            fi
+            
+            log "INFO" "  Summary: $summary_file"
+            log "INFO" "  Index: $index_file"
+        else
+            # Process with AI
+            local ai_result
+            if ! ai_result=$(process_with_ai "$text_file" "$section" "$source_name" "$doc_version"); then
+                die "Failed to process section: $name"
+            fi
+            
+            # Collect output files (ai_result is the JSON line from process_with_ai)
+            summary_file=$(echo "$ai_result" | jq -r '.summary_file')
+            index_file=$(echo "$ai_result" | jq -r '.index_file')
+        fi
         
         summary_files+=("$summary_file")
         index_files+=("$index_file")
@@ -558,6 +610,17 @@ main() {
     
     if ! generate_quick_reference "$source_name" "${summary_files[@]}"; then
         die "Failed to generate quick reference"
+    fi
+    
+    # Clean up forensics files from previous failures (success = clean slate)
+    log_info "Cleaning up old forensics files..."
+    local forensics_count
+    forensics_count=$(find "$OUTPUT_DIR" -name "FAILED-*.txt" 2>/dev/null | wc -l)
+    if [[ $forensics_count -gt 0 ]]; then
+        find "$OUTPUT_DIR" -name "FAILED-*.txt" -delete
+        log_info "  Removed $forensics_count old failure forensics files"
+    else
+        log_info "  No old forensics files to clean up"
     fi
     
     # Summary

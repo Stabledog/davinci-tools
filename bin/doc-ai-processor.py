@@ -52,7 +52,7 @@ class AIProcessor:
             
             self.client = anthropic.Anthropic(api_key=api_key)
             if not self.model:
-                self.model = "claude-3-5-sonnet-20241022"
+                self.model = "claude-sonnet-4-5-20250929"
         
         elif self.provider == "openai":
             if not OPENAI_AVAILABLE:
@@ -154,7 +154,26 @@ Process the following documentation excerpt and create a comprehensive structure
 
 Generate the structured summary now."""
 
-        return self.call_ai(prompt, system_prompt)
+        response = self.call_ai(prompt, system_prompt)
+        
+        # Sanity check for truncated/failed responses
+        if len(response) < 100:
+            section_name = section_info.get("name", "unknown")
+            output_dir = Path(os.getenv("OUTPUT_DIR", "."))
+            forensics_file = output_dir / f"FAILED-summary-response-{section_name}-{datetime.now().strftime('%Y%m%d-%H%M%S')}.txt"
+            try:
+                with open(forensics_file, "w", encoding="utf-8") as f:
+                    f.write("=== AI Response (Suspiciously Short Summary) ===\n")
+                    f.write(f"Section: {section_info.get('title', 'Unknown')}\n")
+                    f.write(f"Timestamp: {datetime.now().isoformat()}\n")
+                    f.write(f"Response length: {len(response)} chars (expected thousands)\n")
+                    f.write("\n=== Full Response ===\n")
+                    f.write(response)
+                print(f"DEBUG: Suspiciously short summary saved to: {forensics_file}", file=sys.stderr)
+            except Exception as write_err:
+                print(f"DEBUG: Failed to save forensics file: {write_err}", file=sys.stderr)
+        
+        return response
     
     def generate_index(self, text: str, section_info: Dict[str, Any]) -> Dict[str, Any]:
         """Generate LLM-optimized index as JSON."""
@@ -229,6 +248,29 @@ Generate the index as valid JSON now. Output ONLY the JSON, no additional text."
                 except:
                     pass
             
+            # Save full response for forensics
+            section_name = section_info.get("name", "unknown")
+            output_dir = Path(os.getenv("OUTPUT_DIR", "."))
+            forensics_file = output_dir / f"FAILED-index-response-{section_name}-{datetime.now().strftime('%Y%m%d-%H%M%S')}.txt"
+            try:
+                with open(forensics_file, "w", encoding="utf-8") as f:
+                    f.write("=== AI Response (Failed JSON Parse) ===\n")
+                    f.write(f"Section: {section_info.get('title', 'Unknown')}\n")
+                    f.write(f"Timestamp: {datetime.now().isoformat()}\n")
+                    f.write(f"Response length: {len(response)} chars\n")
+                    f.write(f"Parse error: {e}\n")
+                    f.write("\n=== Full Response ===\n")
+                    f.write(response)
+                print(f"DEBUG: Full response saved to: {forensics_file}", file=sys.stderr)
+            except Exception as write_err:
+                print(f"DEBUG: Failed to save forensics file: {write_err}", file=sys.stderr)
+            
+            # Debug output for troubleshooting
+            print(f"DEBUG: Failed to parse JSON from AI response", file=sys.stderr)
+            print(f"DEBUG: Response length: {len(response)} chars", file=sys.stderr)
+            print(f"DEBUG: First 500 chars: {response[:500]}", file=sys.stderr)
+            print(f"DEBUG: Last 500 chars: {response[-500:]}", file=sys.stderr)
+            
             raise RuntimeError(f"Failed to parse AI-generated JSON: {e}")
 
 
@@ -262,25 +304,31 @@ def process_section(text_file: Path, section_info: Dict[str, Any],
                     output_dir: Path, ai_processor: AIProcessor) -> Dict[str, Path]:
     """Process a single section: generate summary and index."""
     
-    print(f"Processing section: {section_info['name']}")
+    print(f"Processing section: {section_info['name']}", file=sys.stderr)
     
-    # Read extracted text
-    with open(text_file, "r", encoding="utf-8") as f:
-        text = f.read()
+    # Read extracted text with fallback encoding handling
+    try:
+        with open(text_file, "r", encoding="utf-8") as f:
+            text = f.read()
+    except UnicodeDecodeError:
+        # Fallback to latin-1 which accepts all byte values
+        print("  Warning: UTF-8 decode failed, using latin-1 encoding", file=sys.stderr)
+        with open(text_file, "r", encoding="latin-1") as f:
+            text = f.read()
     
     if not text.strip():
         raise RuntimeError(f"Extracted text is empty: {text_file}")
     
     char_count = len(text)
     line_count = text.count('\n') + 1
-    print(f"  Text: {char_count:,} chars, {line_count:,} lines")
+    print(f"  Text: {char_count:,} chars, {line_count:,} lines", file=sys.stderr)
     
     # Generate summary
-    print("  Generating summary with AI...")
+    print("  Generating summary with AI...", file=sys.stderr)
     summary = ai_processor.generate_summary(text, section_info)
     
     # Generate index
-    print("  Generating index with AI...")
+    print("  Generating index with AI...", file=sys.stderr)
     index = ai_processor.generate_index(text, section_info)
     
     # Write outputs
@@ -292,11 +340,11 @@ def process_section(text_file: Path, section_info: Dict[str, Any],
     
     with open(summary_file, "w", encoding="utf-8") as f:
         f.write(summary)
-    print(f"  ✓ Summary: {summary_file}")
+    print(f"  [OK] Summary: {summary_file}", file=sys.stderr)
     
     with open(index_file, "w", encoding="utf-8") as f:
         json.dump(index, f, indent=2)
-    print(f"  ✓ Index: {index_file}")
+    print(f"  [OK] Index: {index_file}", file=sys.stderr)
     
     return {
         "summary": summary_file,
@@ -312,6 +360,8 @@ def main():
     )
     parser.add_argument("--test-connection", action="store_true",
                         help="Test API connection and exit")
+    parser.add_argument("--list-models", action="store_true",
+                        help="List available models and exit")
     parser.add_argument("--text-file", type=Path,
                         help="Path to extracted text file")
     parser.add_argument("--section-name",
@@ -332,7 +382,7 @@ def main():
     parser.add_argument("--model", default=os.getenv("AI_MODEL"),
                         help="AI model name (optional, uses provider default)")
     parser.add_argument("--max-tokens", type=int, 
-                        default=int(os.getenv("AI_MAX_TOKENS", "4096")),
+                        default=int(os.getenv("AI_MAX_TOKENS", "16384")),
                         help="Max tokens for AI responses")
     
     args = parser.parse_args()
@@ -354,13 +404,50 @@ def main():
             print(f"Testing {args.provider} API connection...")
             response = ai_processor.call_ai("Respond with only: OK")
             if "OK" in response.upper():
-                print(f"✓ Connection successful (model: {ai_processor.model})")
+                print(f"[OK] Connection successful (model: {ai_processor.model})")
                 sys.exit(0)
             else:
                 print(f"WARNING: Unexpected response: {response}", file=sys.stderr)
                 sys.exit(1)
         except Exception as e:
-            print(f"ERROR: Connection test failed: {e}", file=sys.stderr)
+            error_msg = str(e)
+            print(f"ERROR: Connection test failed: {error_msg}", file=sys.stderr)
+            
+            # Provide helpful hints for common errors
+            if "404" in error_msg or "not_found" in error_msg.lower():
+                print(f"\nHINT: Model '{ai_processor.model}' not found.", file=sys.stderr)
+                print(f"Try running: python {sys.argv[0]} --list-models --provider {args.provider}", file=sys.stderr)
+            elif "401" in error_msg or "authentication" in error_msg.lower():
+                print(f"\nHINT: API key invalid or not set.", file=sys.stderr)
+                if args.provider == "anthropic":
+                    print("Set environment variable: ANTHROPIC_API_KEY", file=sys.stderr)
+                elif args.provider == "openai":
+                    print("Set environment variable: OPENAI_API_KEY", file=sys.stderr)
+            
+            sys.exit(1)
+    
+    # Handle list models mode
+    if args.list_models:
+        try:
+            print(f"Querying {args.provider} for available models...")
+            
+            if args.provider == "anthropic":
+                models = ai_processor.client.models.list()
+                print("\nAvailable Claude models:")
+                for model in models.data:
+                    print(f"  - {model.id}")
+            
+            elif args.provider == "openai":
+                models = ai_processor.client.models.list()
+                print("\nAvailable GPT models:")
+                for model in models.data:
+                    if "gpt" in model.id.lower():
+                        print(f"  - {model.id}")
+            
+            sys.exit(0)
+        
+        except Exception as e:
+            print(f"ERROR: Failed to query models: {e}", file=sys.stderr)
             sys.exit(1)
     
     # Validate inputs for normal processing mode
@@ -412,10 +499,11 @@ def main():
         result = process_section(args.text_file, section_info, args.output_dir, ai_processor)
         
         # Output results as JSON for shell script consumption
+        # Convert Windows paths to forward slashes for JSON/bash compatibility
         output = {
             "success": True,
-            "summary_file": str(result["summary"]),
-            "index_file": str(result["index"]),
+            "summary_file": result["summary"].as_posix(),
+            "index_file": result["index"].as_posix(),
             "char_count": result["char_count"],
             "line_count": result["line_count"]
         }
