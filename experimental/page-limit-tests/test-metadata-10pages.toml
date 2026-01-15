@@ -1,0 +1,26 @@
+# doc-metadata.toml
+# Document boundary specification for DaVinci Resolve color grading research
+# Created: 2026-01-10
+
+[document]
+source_pdf = "projects__/legend_of_halle_/Davinci_Resolve_Manual.pdf"
+title = "DaVinci Resolve Manual"
+version = "20"
+date = "2025-07"
+resolve_version = "20"
+
+# ==============================================================================
+# Color Grading Section
+# ==============================================================================
+# Covers: Color page layout, primary/secondary correction, nodes, curves,
+# scopes, LUTs, ACES, HDR grading, and practical workflows.
+# ==============================================================================
+
+
+[[sections]]
+name = "color-grading"
+title = "Test Section"
+description = "Testing with 10 pages"
+start_page = 2952
+end_page = 2961
+priority = "high"

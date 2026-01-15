@@ -1,0 +1,25 @@
+Logs
+Last refresh time: January 11, 2026 at 8:11 AM EST
+Time (EST)	ID	Model	Input
+Tokens	Output
+Tokens	Type	Service
+Tier	Request
+2026-01-11 07:59:08	req_…PkaN9cw	claude-sonnet-4-5-20250929	
+11246
+7636	HTTP	Standard	
+2026-01-11 07:56:54	req_…fCmKeAr	claude-sonnet-4-5-20250929	
+11283
+10839	HTTP	Standard	
+2026-01-11 07:52:39	req_…Pk46oip	claude-sonnet-4-5-20250929	
+13
+4	HTTP	Standard	
+2026-01-11 07:50:43	req_…Aeih7UY	claude-sonnet-4-5-20250929	
+13
+4	HTTP	Standard	
+2026-01-10 22:58:08	req_…frDnvha	claude-sonnet-4-5-20250929	
+11246
+6626	HTTP	Standard	
+2026-01-10 22:56:24	req_…R6E9vcd	claude-sonnet-4-5-20250929	
+11283
+9675	HTTP	Standard	
+

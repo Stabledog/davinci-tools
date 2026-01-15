@@ -5,6 +5,48 @@ This directory contains executable scripts for workspace setup, automation, and 
 
 ---
 
+## Critical: Output Discipline in Shell Scripts
+
+### The Stdout Contamination Problem
+Shell scripts that capture function output with `result=$(function)` are vulnerable to stdout contamination. When functions write user messages to stdout (instead of stderr or log files), those messages get captured along with data, causing parse failures.
+
+**The Three Output Streams:**
+1. **stdout** - Data for capture/piping: `result=$(function)`
+2. **stderr** - User messages, progress, errors: `echo "message" >&2`
+3. **Log files** - Persistent records: `echo "log" >> "$LOGFILE"`
+
+**Common Mistake:**
+```bash
+# BAD: tee writes to BOTH log file AND stdout
+log() { echo "$*" | tee -a "$LOGFILE"; }
+
+# When function output is captured:
+result=$(my_function)  # Captures log output + data = CONTAMINATED!
+```
+
+**Correct Pattern:**
+```bash
+# GOOD: Separate data output from logging
+log() { echo "$*" >> "$LOGFILE"; }  # Only to file
+msg() { echo "$*" >&2; }             # Only to stderr
+
+my_function() {
+    log "Processing..."    # To file only
+    msg "Status: working"  # User sees on stderr
+    echo "clean_data"      # ONLY this to stdout
+}
+
+result=$(my_function)  # result="clean_data" (uncontaminated)
+```
+
+**Rules:**
+- Functions whose output is captured MUST NOT use `tee` or write messages to stdout
+- All user-facing messages go to stderr or log files
+- Test captured output: `result=$(func); echo "$result" | jq .` should parse cleanly
+- Colored output helpers (`log_info`, `log_warn`) must NOT be used inside captured functions
+
+---
+
 ## Script Quality Requirements
 
 ### 1. Template and Pattern

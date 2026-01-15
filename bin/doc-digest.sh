@@ -64,7 +64,7 @@ die() {
         local msg="$*"
         local timestamp
         timestamp=$(date +"%Y-%m-%d %H:%M:%S")
-        echo "[$timestamp] [$level] $msg" | tee -a "$LOG_FILE"
+        echo "[$timestamp] [$level] $msg" >> "$LOG_FILE"
     }
 
     log_info() {
@@ -281,7 +281,7 @@ die() {
         title=$(echo "$section_json" | jq -r '.title')
         description=$(echo "$section_json" | jq -r '.description // ""')
         
-        log_info "Processing with AI: $name"
+        log "INFO" "Processing with AI: $name"
         
         # Call Python AI processor (stderr stays separate for progress messages)
         local ai_result
@@ -591,6 +591,10 @@ main() {
             if ! ai_result=$(process_with_ai "$text_file" "$section" "$source_name" "$doc_version"); then
                 die "Failed to process section: $name"
             fi
+            
+            # Debug: save what we captured for forensics
+            echo "$ai_result" > "$OUTPUT_DIR/DEBUG-captured-ai-result.txt"
+            log "DEBUG" "Captured AI result saved to DEBUG-captured-ai-result.txt"
             
             # Collect output files (ai_result is the JSON line from process_with_ai)
             summary_file=$(echo "$ai_result" | jq -r '.summary_file')

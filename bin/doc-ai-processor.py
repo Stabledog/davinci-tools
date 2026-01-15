@@ -306,14 +306,15 @@ def process_section(text_file: Path, section_info: Dict[str, Any],
     
     print(f"Processing section: {section_info['name']}", file=sys.stderr)
     
-    # Read extracted text with fallback encoding handling
+    # Read extracted text with robust UTF-8 error handling
+    # pdftotext outputs UTF-8, but may have replacement chars for special glyphs
     try:
         with open(text_file, "r", encoding="utf-8") as f:
             text = f.read()
     except UnicodeDecodeError:
-        # Fallback to latin-1 which accepts all byte values
-        print("  Warning: UTF-8 decode failed, using latin-1 encoding", file=sys.stderr)
-        with open(text_file, "r", encoding="latin-1") as f:
+        # Use UTF-8 with error replacement instead of wrong encoding
+        print("  Warning: UTF-8 decode failed, using error replacement", file=sys.stderr)
+        with open(text_file, "r", encoding="utf-8", errors="replace") as f:
             text = f.read()
     
     if not text.strip():
@@ -414,7 +415,10 @@ def main():
             print(f"ERROR: Connection test failed: {error_msg}", file=sys.stderr)
             
             # Provide helpful hints for common errors
-            if "404" in error_msg or "not_found" in error_msg.lower():
+            if "credit balance" in error_msg.lower() or "insufficient" in error_msg.lower():
+                print(f"\nHINT: Insufficient API credits.", file=sys.stderr)
+                print(f"Visit your {args.provider.title()} account to add credits or upgrade your plan.", file=sys.stderr)
+            elif "404" in error_msg or "not_found" in error_msg.lower():
                 print(f"\nHINT: Model '{ai_processor.model}' not found.", file=sys.stderr)
                 print(f"Try running: python {sys.argv[0]} --list-models --provider {args.provider}", file=sys.stderr)
             elif "401" in error_msg or "authentication" in error_msg.lower():
